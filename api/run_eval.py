@@ -27,10 +27,18 @@ load_dotenv()
 
 
 def fetch_audio_urls(dataset_path, dataset, split, batch_size=100, max_retries=20):
+    print("Fetching audio URLs")
     API_URL = "https://datasets-server.huggingface.co/rows"
 
     size_url = f"https://datasets-server.huggingface.co/size?dataset={dataset_path}&config={dataset}&split={split}"
+    print("Size URL:", size_url)
     size_response = requests.get(size_url).json()
+    print("Size response:", size_response)
+    
+    # Check for errors in the response
+    if "error" in size_response:
+        raise ValueError(f"Dataset API error: {size_response['error']}")
+    
     total_rows = size_response["size"]["config"]["num_rows"]
     audio_urls = []
     for offset in tqdm(range(0, total_rows, batch_size), desc="Fetching audio URLs"):
@@ -257,6 +265,72 @@ def transcribe_with_retry(
 
                 return "".join(transcript_text) if transcript_text else ""
 
+            elif model_name.startswith("deepgram/"):
+                api_key = os.getenv("DEEPGRAM_API_KEY")
+                if not api_key:
+                    raise ValueError("DEEPGRAM_API_KEY environment variable not set")
+
+                model_id = model_name.split("/")[1]
+                headers = {"Authorization": f"Token {api_key}"}
+                params = {
+                    "model": model_id,
+                    "language": "en",
+                    "smart_format": "true",
+                }
+
+                if use_url:
+                    audio_url = sample["row"]["audio"][0]["src"]
+                    audio_duration = sample["row"]["audio_length_s"]
+                    if audio_duration < 0.160:
+                        print(f"Skipping audio duration {audio_duration}s")
+                        return "."
+                    headers["Content-Type"] = "application/json"
+                    response = requests.post(
+                        "https://api.deepgram.com/v1/listen",
+                        headers=headers,
+                        params=params,
+                        json={"url": audio_url},
+                    )
+                else:
+                    audio_duration = (
+                        len(sample["audio"]["array"]) / sample["audio"]["sampling_rate"]
+                    )
+                    if audio_duration < 0.160:
+                        print(f"Skipping audio duration {audio_duration}s")
+                        return "."
+                    headers["Content-Type"] = "audio/wav"
+                    with open(audio_file_path, "rb") as f:
+                        response = requests.post(
+                            "https://api.deepgram.com/v1/listen",
+                            headers=headers,
+                            params=params,
+                            data=f,
+                        )
+
+                response.raise_for_status()
+                result = response.json()
+
+                # Robustly extract transcript across API variants
+                transcript = ""
+                try:
+                    alternatives = result["results"]["channels"][0]["alternatives"]
+                    if len(alternatives) > 0:
+                        alt = alternatives[0]
+                        if isinstance(alt, dict):
+                            if "transcript" in alt and isinstance(alt["transcript"], str):
+                                transcript = alt["transcript"]
+                            elif "paragraphs" in alt and isinstance(alt["paragraphs"], dict) and "transcript" in alt["paragraphs"]:
+                                transcript = alt["paragraphs"]["transcript"]
+                            elif "words" in alt and isinstance(alt["words"], list):
+                                transcript = " ".join([w.get("word", "") for w in alt["words"]]).strip()
+                except Exception:
+                    pass
+
+                if not isinstance(transcript, str):
+                    transcript = str(transcript)
+
+                return transcript
+
             else:
                 raise ValueError(
                     "Invalid model prefix, must start with 'assembly/', 'openai/', 'elevenlabs/' or 'revai/'"
@@ -416,7 +490,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         required=True,
-        help="Prefix model name with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', or 'speechmatics/'",
+        help="Prefix model name with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', 'speechmatics/', or 'deepgram/'",
     )
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument(
