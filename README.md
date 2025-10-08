@@ -1,3 +1,5 @@
+If you're looking to benchmark API endpoints, refer to /api/README.md.
+
 # Open ASR Leaderboard
 
 This repository contains the code for the Open ASR Leaderboard. The leaderboard is a Gradio Space that allows users to compare the accuracy of ASR models on a variety of datasets. The leaderboard is hosted at [hf-audio/open_asr_leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).
