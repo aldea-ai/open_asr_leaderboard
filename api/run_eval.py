@@ -131,7 +131,7 @@ def transcribe_with_retry(
     retries = 0
     while retries <= max_retries:
         try:
-            PREFIX = "speechmatics/"
+            PREFIX = "speechmatics-batch/"
             if model_name.startswith(PREFIX):
                 api_key = os.getenv("SPEECHMATICS_API_KEY")
                 if not api_key:
@@ -200,6 +200,64 @@ def transcribe_with_retry(
                         raise Exception(
                             f"Speechmatics transcription failed: {str(e)}"
                         ) from e
+
+            elif model_name.startswith("speechmatics-rt/"):
+                api_key = os.getenv("SPEECHMATICS_API_KEY")
+                if not api_key:
+                    raise ValueError(
+                        "SPEECHMATICS_API_KEY environment variable not set"
+                    )
+
+                # Use WebsocketClient for real-time streaming
+                from speechmatics.client import WebsocketClient
+                from speechmatics.models import TranscriptionConfig, AudioSettings, ServerMessageType
+
+                operating_point = model_name.split("/")[1]  # e.g., "enhanced"
+
+                # Connection settings
+                settings = ConnectionSettings(
+                    url="wss://eu2.rt.speechmatics.com/v2",
+                    auth_token=api_key
+                )
+
+                # Create WebSocket client
+                ws_client = WebsocketClient(settings)
+
+                # Collect transcript parts
+                transcript_parts = []
+
+                def collect_transcript(msg):
+                    transcript_parts.append(msg['metadata']['transcript'])
+
+                # Register event handler for full transcripts only
+                ws_client.add_event_handler(
+                    event_name=ServerMessageType.AddTranscript,
+                    event_handler=collect_transcript
+                )
+
+                # Configure transcription
+                conf = TranscriptionConfig(
+                    language="en",
+                    enable_partials=False,  # Only get final transcripts
+                    operating_point=operating_point,
+                    enable_entities=True,
+                )
+
+                audio_settings = AudioSettings()
+
+                # Run transcription
+                if use_url:
+                    # Download audio first for WebSocket
+                    audio_url = sample["row"]["audio"][0]["src"]
+                    response = requests.get(audio_url, timeout=REQUEST_TIMEOUT)
+                    audio_data = BytesIO(response.content)
+                    ws_client.run_synchronously(audio_data, conf, audio_settings)
+                else:
+                    with open(audio_file_path, "rb") as audio_file:
+                        ws_client.run_synchronously(audio_file, conf, audio_settings)
+
+                # Combine all transcript parts
+                return " ".join(transcript_parts)
 
             elif model_name.startswith("assembly/"):
                 aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
@@ -545,7 +603,7 @@ def transcribe_with_retry(
 
             else:
                 raise ValueError(
-                    "Invalid model prefix, must start with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', 'speechmatics/', 'deepgram/', 'groq/', or 'aldea/'"
+                    "Invalid model prefix, must start with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', 'speechmatics-batch/', 'speechmatics-rt/', 'deepgram/', 'groq/', or 'aldea/'"
                 )
 
         except Exception as e:
@@ -750,7 +808,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         required=True,
-        help="Prefix model name with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', 'speechmatics/', 'deepgram/', or 'groq/'",
+        help="Prefix model name with 'assembly/', 'openai/', 'elevenlabs/', 'revai/', 'speechmatics-batch/', 'speechmatics-rt/', 'deepgram/', 'groq/', or 'aldea/'",
     )
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument(
