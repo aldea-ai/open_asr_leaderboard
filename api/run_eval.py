@@ -70,6 +70,17 @@ class TokenBucketRateLimiter:
 OPENAI_WHISPER1_RPM = int(os.getenv("OPENAI_WHISPER1_RPM", "500"))
 OPENAI_WHISPER1_LIMITER = TokenBucketRateLimiter(rate_per_minute=OPENAI_WHISPER1_RPM)
 
+# Global limiter for Aldea benchmark: 0.5 RPS (30 RPM) default, capacity=1 to avoid bursts
+try:
+    _aldea_rps_env = os.getenv("ALDEA_RPS")
+    if _aldea_rps_env is not None:
+        _aldea_rpm = max(1, int(float(_aldea_rps_env) * 60.0))
+    else:
+        _aldea_rpm = int(os.getenv("ALDEA_RPM", "30"))
+except Exception:
+    _aldea_rpm = 30
+ALDEA_LIMITER = TokenBucketRateLimiter(rate_per_minute=_aldea_rpm, capacity=1)
+
 
 def fetch_audio_urls(dataset_path, dataset, split, batch_size=100, max_retries=20):
     print("Fetching audio URLs")
@@ -543,7 +554,7 @@ def transcribe_with_retry(
                 return transcript
 
             elif model_name.startswith("aldea/"):
-                api_url = "https://api.aldea.ai/asr/transcribe"
+                api_url = "https://api.aldea.ai/transcribe"
                 token = os.getenv("ALDEA_API_KEY")
                 headers = {"Content-Type": "wave"}
                 if token:
@@ -567,6 +578,7 @@ def transcribe_with_retry(
                     resp = requests.get(audio_url, timeout=REQUEST_TIMEOUT)
                     resp.raise_for_status()
                     audio_data = BytesIO(resp.content)
+                    ALDEA_LIMITER.acquire()
                     response = requests.post(
                         api_url,
                         headers=headers,
@@ -575,29 +587,44 @@ def transcribe_with_retry(
                     )
                 else:
                     with open(audio_file_path, "rb") as f:
+                        ALDEA_LIMITER.acquire()
                         response = requests.post(
                             api_url,
                             headers=headers,
                             data=f,
                             timeout=REQUEST_TIMEOUT,
                         )
-
+                
                 response.raise_for_status()
+                
+                # Parse the response text which contains multiple JSON objects separated by newlines
                 text = ""
-                try:
-                    payload = response.json()
-                    if isinstance(payload, dict):
-                        if isinstance(payload.get("text"), str):
-                            text = payload["text"]
-                        elif isinstance(payload.get("transcript"), str):
-                            text = payload["transcript"]
-                        elif isinstance(payload.get("data"), dict):
-                            data_obj = payload["data"]
-                            if isinstance(data_obj.get("text"), str):
-                                text = data_obj["text"]
-                except ValueError:
-                    # Not JSON, fall back to raw text
-                    text = response.text or ""
+                for line in response.text.strip().split('\n'):
+                    if line.strip():
+                        try:
+                            json_obj = json.loads(line)
+                            if "text" in json_obj and json_obj["text"]:
+                                text = json_obj["text"]
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                
+                # Fallback to standard JSON parsing if text not found
+                if not text:
+                    try:
+                        payload = response.json()
+                        if isinstance(payload, dict):
+                            if isinstance(payload.get("text"), str):
+                                text = payload["text"]
+                            elif isinstance(payload.get("transcript"), str):
+                                text = payload["transcript"]
+                            elif isinstance(payload.get("data"), dict):
+                                data_obj = payload["data"]
+                                if isinstance(data_obj.get("text"), str):
+                                    text = data_obj["text"]
+                    except ValueError:
+                        # Not JSON, fall back to raw text
+                        text = response.text or ""                    
 
                 return (text or "").strip()
 

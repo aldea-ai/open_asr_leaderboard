@@ -26,7 +26,6 @@ python3.11 run_eval.py \
         --split="test" \
         --model_name openai/whisper-1 \
         --max_workers 50 \
-        --use_url
 ```
 
 ### Batch benchmarking with `run_api.sh`

@@ -32,12 +32,13 @@ MODEL_IDs=(
     # "openai/gpt-4o-mini-transcribe"
     # "elevenlabs/scribe_v1"
     # "assembly/slam-1"
-    "assembly/universal"
+    # "assembly/universal"
+    # "speechmatics-rt/enhanced"
     # "revai/machine" # please use --use_url=True
     # "revai/fusion" # please use --use_url=True
     # "speechmatics-batch/enhanced"  # Batch (async) API
     # "speechmatics-rt/enhanced"     # Real-time (WebSocket) API
-    # "aldea/default"
+    "aldea/beta"
 )
 
 MAX_SAMPLES=400
@@ -52,11 +53,13 @@ get_max_workers() {
     elif [[ $model_id == assembly/* ]]; then
         echo 60  
     elif [[ $model_id == deepgram/* ]]; then
-        echo 50
+        echo 40
     elif [[ $model_id == speechmatics-rt/* ]]; then
         echo 15  # Conservative limit for WebSocket connections
     elif [[ $model_id == speechmatics-batch/* ]]; then
         echo 30  # Batch can handle more
+    elif [[ $model_id == aldea/* ]]; then
+        echo 1  # currently .5 RPS limit
     else
         echo 20  
     fi
@@ -104,7 +107,8 @@ do
         --dataset "librispeech" \
         --split "test.clean" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        --use_url
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.other for ${MODEL_ID} on librispeech"
@@ -113,7 +117,8 @@ do
         --dataset "librispeech" \
         --split "test.other" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        --use_url
         # --max_samples ${MAX_SAMPLES}
     
     echo "Running test.other for ${MODEL_ID} on spgispeech"
