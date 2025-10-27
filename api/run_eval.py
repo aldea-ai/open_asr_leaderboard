@@ -9,6 +9,7 @@ import os
 import sys
 import requests
 import itertools
+from contextlib import nullcontext
 from tqdm import tqdm
 from dotenv import load_dotenv
 from io import BytesIO
@@ -40,7 +41,7 @@ load_dotenv()
 
 # Default connect/read timeouts for all external HTTP calls to avoid hangs
 DEFAULT_CONNECT_TIMEOUT_S = 10
-DEFAULT_READ_TIMEOUT_S = 300
+DEFAULT_READ_TIMEOUT_S = 30
 REQUEST_TIMEOUT = (DEFAULT_CONNECT_TIMEOUT_S, DEFAULT_READ_TIMEOUT_S)
 
 
@@ -49,6 +50,7 @@ ALDEA_ENDPOINTS = []
 _ALDEA_CYCLE = None
 _ALDEA_LOCK = threading.Lock()
 _ALDEA_LOG_ONCE = False
+_ALDEA_ENDPOINT_LOCKS = {}
 
 
 def _normalize_aldea_endpoint(endpoint: str) -> str:
@@ -72,15 +74,17 @@ def _normalize_aldea_endpoint(endpoint: str) -> str:
 
 
 def set_aldea_endpoints(endpoints: list[str]) -> None:
-    global ALDEA_ENDPOINTS, _ALDEA_CYCLE
+    global ALDEA_ENDPOINTS, _ALDEA_CYCLE, _ALDEA_ENDPOINT_LOCKS
     normalized = [_normalize_aldea_endpoint(ep) for ep in endpoints if ep and ep.strip()]
     ALDEA_ENDPOINTS = [ep for ep in normalized if ep]
     if ALDEA_ENDPOINTS:
         # Create a cycle iterator once; guarded by lock for thread-safety on next()
         import itertools as _itertools
         _ALDEA_CYCLE = _itertools.cycle(ALDEA_ENDPOINTS)
+        _ALDEA_ENDPOINT_LOCKS = {ep: threading.Lock() for ep in ALDEA_ENDPOINTS}
     else:
         _ALDEA_CYCLE = None
+        _ALDEA_ENDPOINT_LOCKS = {}
 
 
 def next_aldea_endpoint() -> Optional[str]:
@@ -591,26 +595,29 @@ def transcribe_with_retry(
                     print(f"Skipping audio duration {audio_duration}s")
                     return "."
 
-                if use_url:
-                    # Download audio then POST as raw wave bytes
-                    audio_url = sample["row"]["audio"][0]["src"]
-                    resp = requests.get(audio_url, timeout=REQUEST_TIMEOUT)
-                    resp.raise_for_status()
-                    audio_data = BytesIO(resp.content)
-                    response = requests.post(
-                        api_url,
-                        headers=headers,
-                        data=audio_data,
-                        timeout=REQUEST_TIMEOUT,
-                    )
-                else:
-                    with open(audio_file_path, "rb") as f:
+                endpoint_lock = _ALDEA_ENDPOINT_LOCKS.get(api_url)
+                lock_ctx = endpoint_lock if endpoint_lock is not None else nullcontext()
+                with lock_ctx:
+                    if use_url:
+                        # Download audio then POST as raw wave bytes
+                        audio_url = sample["row"]["audio"][0]["src"]
+                        resp = requests.get(audio_url, timeout=REQUEST_TIMEOUT)
+                        resp.raise_for_status()
+                        audio_data = BytesIO(resp.content)
                         response = requests.post(
                             api_url,
                             headers=headers,
-                            data=f,
+                            data=audio_data,
                             timeout=REQUEST_TIMEOUT,
                         )
+                    else:
+                        with open(audio_file_path, "rb") as f:
+                            response = requests.post(
+                                api_url,
+                                headers=headers,
+                                data=f,
+                                timeout=REQUEST_TIMEOUT,
+                            )
 
                 response.raise_for_status()
                 text = ""
@@ -780,6 +787,9 @@ def transcribe_dataset(
                 return str(value)
 
             normalized_reference = data_utils.normalizer(to_text(reference)) or " "
+            # Ensure Aldea diagnostic tokens are stripped even if upstream missed it
+            if isinstance(model_name, str) and model_name.startswith("aldea/"):
+                transcription = _clean_aldea_transcript(to_text(transcription))
             normalized_transcription = data_utils.normalizer(to_text(transcription)) or " "
 
             # Stream append one JSON line per completed sample

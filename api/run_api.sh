@@ -36,7 +36,8 @@ MODEL_IDs=(
     # "revai/machine" # please use --use_url=True
     # "revai/fusion" # please use --use_url=True
     # "speechmatics/enhanced"
-    "aldea/finetune_voxpopuli_libriheavy_full_run"
+    # "aldea/finetune_voxpopuli_libriheavy_full_run"
+    "aldea/v3_full_run2"
 )
 
 MAX_SAMPLES=400
@@ -54,7 +55,7 @@ get_max_workers() {
         echo 50  
     elif [[ $model_id == aldea/* ]]; then
         # Favor high concurrency when using many local endpoints
-        echo 180
+        echo 10
     else
         echo 20  
     fi
