@@ -1,11 +1,10 @@
 torch
 transformers
 evaluate
-datasets
+datasets==3.6.0
 librosa
 jiwer
 soundfile
 python-dotenv
 requests
 tqdm
-torchcodec==0.3.0
