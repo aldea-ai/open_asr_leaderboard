@@ -35,6 +35,43 @@ DEFAULT_READ_TIMEOUT_S = 300
 REQUEST_TIMEOUT = (DEFAULT_CONNECT_TIMEOUT_S, DEFAULT_READ_TIMEOUT_S)
 
 
+# Global state for Aldea endpoint round-robin
+ALDEA_ENDPOINTS = []
+_ALDEA_CYCLE = None
+_ALDEA_LOCK = threading.Lock()
+
+
+def _normalize_aldea_endpoint(endpoint: str) -> str:
+    e = (endpoint or "").strip()
+    if not e:
+        return e
+    if not (e.startswith("http://") or e.startswith("https://")):
+        e = f"http://{e}"
+    # Ensure path suffix
+    if not e.rstrip("/").endswith("asr/transcribe"):
+        e = e.rstrip("/") + "/asr/transcribe"
+    return e
+
+
+def set_aldea_endpoints(endpoints: list[str]) -> None:
+    global ALDEA_ENDPOINTS, _ALDEA_CYCLE
+    normalized = [_normalize_aldea_endpoint(ep) for ep in endpoints if ep and ep.strip()]
+    ALDEA_ENDPOINTS = [ep for ep in normalized if ep]
+    if ALDEA_ENDPOINTS:
+        # Create a cycle iterator once; guarded by lock for thread-safety on next()
+        import itertools as _itertools
+        _ALDEA_CYCLE = _itertools.cycle(ALDEA_ENDPOINTS)
+    else:
+        _ALDEA_CYCLE = None
+
+
+def next_aldea_endpoint() -> Optional[str]:
+    if _ALDEA_CYCLE is None:
+        return None
+    with _ALDEA_LOCK:
+        return next(_ALDEA_CYCLE)
+
+
 # Simple thread-safe token bucket rate limiter for max throughput without bursts
 class TokenBucketRateLimiter:
     def __init__(self, rate_per_minute: int, capacity: Optional[int] = None) -> None:
@@ -485,7 +522,8 @@ def transcribe_with_retry(
                 return transcript
 
             elif model_name.startswith("aldea/"):
-                api_url = "https://api.aldea.ai/asr/transcribe"
+                # Choose endpoint via round-robin if provided; otherwise fall back to env or default
+                api_url = next_aldea_endpoint() or os.getenv("ALDEA_API_URL") or "https://api.aldea.ai/asr/transcribe"
                 token = os.getenv("ALDEA_API_KEY")
                 headers = {"Content-Type": "wave"}
                 if token:
@@ -761,8 +799,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Use URL-based audio fetching instead of datasets",
     )
+    parser.add_argument(
+        "--aldea_endpoints",
+        type=str,
+        default=None,
+        help="Comma/space separated Aldea endpoints. Each may be a full URL or host:port."
+    )
 
     args = parser.parse_args()
+
+    # Initialize Aldea endpoints from CLI or environment
+    aldea_arg = args.aldea_endpoints
+    aldea_env = os.getenv("ALDEA_ENDPOINTS")
+    endpoints_raw = None
+    if aldea_arg and aldea_arg.strip():
+        endpoints_raw = aldea_arg
+    elif aldea_env and aldea_env.strip():
+        endpoints_raw = aldea_env
+    if endpoints_raw:
+        # split by comma or whitespace
+        parts = [p for chunk in endpoints_raw.split(",") for p in chunk.split()] if "," in endpoints_raw else endpoints_raw.split()
+        set_aldea_endpoints(parts)
 
     transcribe_dataset(
         dataset_path=args.dataset_path,

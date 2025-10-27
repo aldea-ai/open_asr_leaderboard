@@ -41,6 +41,105 @@ nohup bash run_api.sh > run_api.log 2>&1 &
 ```
 
 
+### Provider-specific examples
+
+Below are ready-to-run examples for running a single dataset vs all datasets with specific providers.
+
+#### Aldea (single public endpoint) – one dataset
+Uses the default cloud endpoint unless overridden. Ensure your API key is set if required.
+
+```bash
+export ALDEA_API_KEY=YOUR_TOKEN   # optional if your endpoint requires it
+
+python3.11 run_eval.py \
+  --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
+  --dataset "gigaspeech" \
+  --split "test" \
+  --model_name "aldea/default" \
+  --max_workers 20
+```
+
+To force a specific single endpoint, either set `ALDEA_API_URL` or pass `--aldea_endpoints` with one value:
+
+```bash
+export ALDEA_API_URL="https://api.aldea.ai/asr/transcribe"
+# or
+python3.11 run_eval.py \
+  --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
+  --dataset "gigaspeech" \
+  --split "test" \
+  --model_name "aldea/default" \
+  --max_workers 20 \
+  --aldea_endpoints "https://api.aldea.ai/asr/transcribe"
+```
+
+#### Aldea (multiple local endpoints) – one dataset
+Round-robins across local ports to increase throughput. You can supply endpoints via env or the CLI flag (space- or comma-separated). Hosts may be `host:port` or full URLs; the `/asr/transcribe` path is added automatically if missing.
+
+```bash
+export ALDEA_ENDPOINTS="127.0.0.1:8800 127.0.0.1:8824 127.0.0.1:8848 127.0.0.1:8872 127.0.0.1:8896 127.0.0.1:8920 127.0.0.1:8944 127.0.0.1:8801 127.0.0.1:8825 127.0.0.1:8849 127.0.0.1:8873 127.0.0.1:8897 127.0.0.1:8921 127.0.0.1:8945 127.0.0.1:8802 127.0.0.1:8826 127.0.0.1:8850 127.0.0.1:8874 127.0.0.1:8898 127.0.0.1:8922 127.0.0.1:8946"
+
+python3.11 run_eval.py \
+  --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
+  --dataset "gigaspeech" \
+  --split "test" \
+  --model_name "aldea/default" \
+  --max_workers 160
+
+# Alternatively (explicit flag):
+# --aldea_endpoints "$ALDEA_ENDPOINTS"
+```
+
+#### ElevenLabs – one dataset
+
+```bash
+export ELEVENLABS_API_KEY=YOUR_TOKEN
+
+python3.11 run_eval.py \
+  --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
+  --dataset "gigaspeech" \
+  --split "test" \
+  --model_name "elevenlabs/scribe_v1" \
+  --max_workers 5
+```
+
+#### Aldea (single public endpoint) – all datasets
+Use the batch script with only Aldea enabled. The script automatically forwards `ALDEA_ENDPOINTS` to `run_eval.py` when set, and uses higher concurrency for `aldea/*`.
+
+```bash
+# In run_api.sh, set
+#   MODEL_IDs=(
+#       "aldea/default"
+#   )
+
+cd api
+nohup bash run_api.sh > run_api.log 2>&1 &
+```
+
+#### Aldea (multiple local endpoints) – all datasets
+
+```bash
+export ALDEA_ENDPOINTS="127.0.0.1:8800 127.0.0.1:8824 127.0.0.1:8848 127.0.0.1:8872 127.0.0.1:8896 127.0.0.1:8920 127.0.0.1:8944 127.0.0.1:8801 127.0.0.1:8825 127.0.0.1:8849 127.0.0.1:8873 127.0.0.1:8897 127.0.0.1:8921 127.0.0.1:8945 127.0.0.1:8802 127.0.0.1:8826 127.0.0.1:8850 127.0.0.1:8874 127.0.0.1:8898 127.0.0.1:8922 127.0.0.1:8946"
+
+cd api
+nohup bash run_api.sh > run_api.log 2>&1 &
+```
+
+#### ElevenLabs – all datasets
+
+```bash
+# In run_api.sh, set
+#   MODEL_IDs=(
+#       "elevenlabs/scribe_v1"
+#   )
+
+export ELEVENLABS_API_KEY=YOUR_TOKEN
+
+cd api
+nohup bash run_api.sh > run_api.log 2>&1 &
+```
+
+
 ### Resuming
 The `run_eval.py` logic has been modified to allow for resuming from where a previous `run_eval.py` call with the same model and dataset left off.
 To resume, simply run the same `run_eval.py` call with the same model and dataset.

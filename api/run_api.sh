@@ -12,6 +12,9 @@ export GROQ_API_KEY=""
 # export HF_TOKEN="" # old
 export HF_TOKEN="" # new
 export ALDEA_API_KEY=""
+# Optional: list of local Aldea endpoints (comma or space separated)
+# e.g., "127.0.0.1:8800 127.0.0.1:8824 ..."
+export ALDEA_ENDPOINTS=""
 
 # export MODEL_ID="assembly/slam-1"
 # export MAX_WORKERS=180
@@ -43,6 +46,9 @@ get_max_workers() {
         echo 200  
     elif [[ $model_id == deepgram/* ]]; then
         echo 50  
+    elif [[ $model_id == aldea/* ]]; then
+        # Favor high concurrency when using many local endpoints
+        echo 180
     else
         echo 20  
     fi
@@ -61,7 +67,8 @@ do
         --dataset="ami" \
         --split="test" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --use_url
         # --max_samples ${MAX_SAMPLES}
 
@@ -72,7 +79,8 @@ do
         --dataset="earnings22" \
         --split="test" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.clean for ${MODEL_ID} on gigaspeech"
@@ -81,7 +89,8 @@ do
         --dataset="gigaspeech" \
         --split="test" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.clean for ${MODEL_ID} on librispeech"
@@ -90,7 +99,8 @@ do
         --dataset "librispeech" \
         --split "test.clean" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.other for ${MODEL_ID} on librispeech"
@@ -99,7 +109,8 @@ do
         --dataset "librispeech" \
         --split "test.other" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
     
     echo "Running test.other for ${MODEL_ID} on spgispeech"
@@ -108,7 +119,8 @@ do
         --dataset="spgispeech" \
         --split="test" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.other for ${MODEL_ID} on tedlium"
@@ -118,6 +130,7 @@ do
         --split="test" \
         --model_name ${MODEL_ID} \
         --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"} \
         # --max_samples ${MAX_SAMPLES}
 
     echo "Running test.other for ${MODEL_ID} on voxpopuli"
@@ -126,7 +139,8 @@ do
         --dataset="voxpopuli" \
         --split="test" \
         --model_name ${MODEL_ID} \
-        --max_workers ${MAX_WORKERS} 
+        --max_workers ${MAX_WORKERS} \
+        ${ALDEA_ENDPOINTS:+--aldea_endpoints "$ALDEA_ENDPOINTS"}
         # --max_samples ${MAX_SAMPLES}
 
     # Evaluate results
