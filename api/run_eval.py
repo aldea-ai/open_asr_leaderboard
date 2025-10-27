@@ -113,6 +113,51 @@ def _clean_aldea_transcript(text: str) -> str:
     return s
 
 
+# Parse CLI --range like "1-10000" into zero-based (start, end_exclusive)
+def _parse_range_spec(range_str: Optional[str]) -> Optional[tuple[int, int]]:
+    if not range_str:
+        return None
+    s = range_str.strip()
+    m = re.match(r"^(\d+)\s*[-:]\s*(\d+)$", s)
+    if not m:
+        raise ValueError("--range must be like 'START-END', e.g., 1-10000")
+    start_1 = int(m.group(1))
+    end_1 = int(m.group(2))
+    if start_1 <= 0 or end_1 <= 0:
+        raise ValueError("--range values must be positive (1-based)")
+    if end_1 < start_1:
+        raise ValueError("--range END must be >= START")
+    start_0 = start_1 - 1
+    end_exclusive = end_1  # inclusive end in 1-based becomes exclusive in 0-based
+    return (start_0, end_exclusive)
+
+
+# Set provider API key env var based on model prefix when --api_key is supplied
+def _apply_api_key_for_model(model_name: str, api_key: str) -> None:
+    if not api_key:
+        return
+    try:
+        if model_name.startswith("aldea/"):
+            os.environ["ALDEA_API_KEY"] = api_key
+        elif model_name.startswith("openai/"):
+            os.environ["OPENAI_API_KEY"] = api_key
+        elif model_name.startswith("assembly/"):
+            os.environ["ASSEMBLYAI_API_KEY"] = api_key
+        elif model_name.startswith("elevenlabs/"):
+            os.environ["ELEVENLABS_API_KEY"] = api_key
+        elif model_name.startswith("deepgram/"):
+            os.environ["DEEPGRAM_API_KEY"] = api_key
+        elif model_name.startswith("groq/"):
+            os.environ["GROQ_API_KEY"] = api_key
+        elif model_name.startswith("speechmatics-batch/") or model_name.startswith("speechmatics-rt/"):
+            os.environ["SPEECHMATICS_API_KEY"] = api_key
+        elif model_name.startswith("revai/"):
+            os.environ["REVAI_API_KEY"] = api_key
+    except Exception:
+        # Best-effort; do not block execution on env set failures
+        pass
+
+
 # Simple thread-safe token bucket rate limiter for max throughput without bursts
 class TokenBucketRateLimiter:
     def __init__(self, rate_per_minute: int, capacity: Optional[int] = None) -> None:
@@ -735,16 +780,23 @@ def transcribe_dataset(
     use_url=False,
     max_samples=None,
     max_workers=4,
+    sample_range: Optional[tuple[int, int]] = None,
 ):
     # Prepare results manifest path and resume state
     results_dir = "./results/"
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
-    manifest_path = os.path.join(
-        results_dir,
-        f"MODEL_{model_name.replace('/', '-')}_DATASET_{dataset_path.replace('/', '-')}_{dataset}_{split}.jsonl",
+    range_suffix = ""
+    if sample_range is not None:
+        # Display range as 1-based inclusive for clarity in filename
+        rs, rexc = sample_range
+        range_suffix = f"_RANGE_{rs+1}-{rexc}"
+
+    manifest_filename = (
+        f"MODEL_{model_name.replace('/', '-')}_DATASET_{dataset_path.replace('/', '-')}_{dataset}_{split}{range_suffix}.jsonl"
     )
+    manifest_path = os.path.join(results_dir, manifest_filename)
 
     existing_count = 0
     if os.path.exists(manifest_path):
@@ -759,18 +811,44 @@ def transcribe_dataset(
             )
     if use_url:
         audio_rows = fetch_audio_urls(dataset_path, dataset, split)
-        if max_samples:
-            audio_rows = itertools.islice(audio_rows, max_samples)
+        # Apply optional range (zero-based start, exclusive end)
+        if sample_range is not None:
+            rs, rexc = sample_range
+            audio_rows = itertools.islice(audio_rows, rs, rexc)
+        # Apply optional max_samples cap within this slice
+        if max_samples is not None:
+            audio_rows = itertools.islice(audio_rows, 0, max_samples)
         ds = audio_rows
     else:
         ds = datasets.load_dataset(dataset_path, dataset, split=split, streaming=False)
         ds = data_utils.prepare_data(ds)
-        if max_samples:
-            ds = ds.take(max_samples)
+        # Apply optional range using Dataset.select for efficiency
+        if sample_range is not None:
+            rs, rexc = sample_range
+            end_bound = min(rexc, len(ds))
+            if rs >= end_bound:
+                ds = ds.select([])
+            else:
+                ds = ds.select(range(rs, end_bound))
+        # Apply optional max_samples on the already-sliced dataset
+        if max_samples is not None:
+            cap = min(max_samples, len(ds))
+            ds = ds.select(range(0, cap))
 
     # Apply resume skipping if a manifest already exists
     if existing_count > 0:
-        ds = itertools.islice(ds, existing_count, None)
+        try:
+            # Hugging Face Dataset supports len() and select()
+            if hasattr(ds, "select") and hasattr(ds, "__len__"):
+                remaining = len(ds)
+                if existing_count < remaining:
+                    ds = ds.select(range(existing_count, remaining))
+                else:
+                    ds = ds.select([])
+            else:
+                ds = itertools.islice(ds, existing_count, None)
+        except Exception:
+            ds = itertools.islice(ds, existing_count, None)
 
     # Open manifest for append; write per-sample lines to avoid data loss on crash
     manifest_fp = open(manifest_path, "a", encoding="utf-8")
@@ -925,6 +1003,19 @@ if __name__ == "__main__":
         default=None,
         help="Comma/space separated Aldea endpoints. Each may be a full URL or host:port."
     )
+    parser.add_argument(
+        "--range",
+        dest="sample_range",
+        type=str,
+        default=None,
+        help="1-based inclusive range of sample indices to process, e.g., 1-10000",
+    )
+    parser.add_argument(
+        "--api_key",
+        type=str,
+        default=None,
+        help="Provider API key to use for this run (overrides env for the chosen model)",
+    )
 
     args = parser.parse_args()
 
@@ -941,6 +1032,13 @@ if __name__ == "__main__":
         parts = [p for chunk in endpoints_raw.split(",") for p in chunk.split()] if "," in endpoints_raw else endpoints_raw.split()
         set_aldea_endpoints(parts)
 
+    # Apply api key override if provided
+    if args.api_key:
+        _apply_api_key_for_model(args.model_name, args.api_key)
+
+    # Parse optional range
+    parsed_range = _parse_range_spec(args.sample_range) if args.sample_range else None
+
     transcribe_dataset(
         dataset_path=args.dataset_path,
         dataset=args.dataset,
@@ -949,4 +1047,5 @@ if __name__ == "__main__":
         use_url=args.use_url,
         max_samples=args.max_samples,
         max_workers=args.max_workers,
+        sample_range=parsed_range,
     )
