@@ -35,7 +35,8 @@ MODEL_IDs=(
     # "assembly/slam-1"
     # "revai/machine" # please use --use_url=True
     # "revai/fusion" # please use --use_url=True
-    # "speechmatics/enhanced"
+    # "speechmatics-batch/enhanced"  # Batch (async) API
+    # "speechmatics-rt/enhanced"     # Real-time (WebSocket) API
     # "aldea/finetune_voxpopuli_libriheavy_full_run"
     "aldea/v3_full_run2"
 )
@@ -56,6 +57,10 @@ get_max_workers() {
     elif [[ $model_id == aldea/* ]]; then
         # Favor high concurrency when using many local endpoints
         echo 10
+    elif [[ $model_id == speechmatics-rt/* ]]; then
+        echo 15  # Conservative limit for WebSocket connections
+    elif [[ $model_id == speechmatics-batch/* ]]; then
+        echo 30  # Batch can handle more
     else
         echo 20  
     fi
