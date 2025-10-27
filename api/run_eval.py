@@ -34,6 +34,7 @@ from requests_toolbelt import MultipartEncoder
 from email.utils import parsedate_to_datetime
 import threading
 import json
+import re
 
 load_dotenv()
 
@@ -47,6 +48,7 @@ REQUEST_TIMEOUT = (DEFAULT_CONNECT_TIMEOUT_S, DEFAULT_READ_TIMEOUT_S)
 ALDEA_ENDPOINTS = []
 _ALDEA_CYCLE = None
 _ALDEA_LOCK = threading.Lock()
+_ALDEA_LOG_ONCE = False
 
 
 def _normalize_aldea_endpoint(endpoint: str) -> str:
@@ -85,7 +87,26 @@ def next_aldea_endpoint() -> Optional[str]:
     if _ALDEA_CYCLE is None:
         return None
     with _ALDEA_LOCK:
-        return next(_ALDEA_CYCLE)
+        ep = next(_ALDEA_CYCLE)
+        return ep
+
+
+def _clean_aldea_transcript(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return ""
+    s = text
+    # Remove leading diagnostic tokens like: "chunk id 12345" (case-insensitive)
+    s = re.sub(r"^\s*chunk\s+id\s+\d+\s*", "", s, flags=re.IGNORECASE)
+    # Remove optional leading sequence markers like: "seq one" or "seq 1"
+    s = re.sub(r"^\s*seq\s+\w+\s*", "", s, flags=re.IGNORECASE)
+    # Remove an explicit leading 'text' token if present
+    s = re.sub(r"^\s*text\s+", "", s, flags=re.IGNORECASE)
+    # Remove trailing status markers anywhere they appear
+    s = re.sub(r"\bwords\s+pending\s+\d+\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bevent\s+done\s+pending\s+\d+\b", "", s, flags=re.IGNORECASE)
+    # Collapse extraneous whitespace left by removals
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 # Simple thread-safe token bucket rate limiter for max throughput without bursts
@@ -539,7 +560,20 @@ def transcribe_with_retry(
 
             elif model_name.startswith("aldea/"):
                 # Choose endpoint via round-robin if provided; otherwise fall back to env or default
-                api_url = next_aldea_endpoint() or os.getenv("ALDEA_API_URL") or "https://api.aldea.ai/asr/transcribe"
+                ep_from_list = next_aldea_endpoint()
+                if ep_from_list:
+                    api_url = ep_from_list
+                    source = "list"
+                else:
+                    api_url = os.getenv("ALDEA_API_URL") or "https://api.aldea.ai/transcribe"
+                    source = "env" if os.getenv("ALDEA_API_URL") else "default"
+                global _ALDEA_LOG_ONCE
+                if not _ALDEA_LOG_ONCE:
+                    if source == "list":
+                        print(f"[Aldea] Endpoints configured: {len(ALDEA_ENDPOINTS)} (round-robin)")
+                    else:
+                        print(f"[Aldea] Using {source} endpoint: {api_url}")
+                    _ALDEA_LOG_ONCE = True
                 token = os.getenv("ALDEA_API_KEY")
                 headers = {"Content-Type": "wave"}
                 if token:
@@ -595,7 +629,8 @@ def transcribe_with_retry(
                     # Not JSON, fall back to raw text
                     text = response.text or ""
 
-                return (text or "").strip()
+                cleaned = _clean_aldea_transcript((text or "").strip())
+                return cleaned
 
             else:
                 raise ValueError(

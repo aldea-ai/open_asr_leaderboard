@@ -2,6 +2,12 @@
 
 export PYTHONPATH="/Users/kevin/Documents/aldea/open_asr_leaderboard"
 echo "PYTHONPATH: $PYTHONPATH"
+if [[ -n "$ALDEA_ENDPOINTS" ]]; then
+  EP_COUNT=$(echo "$ALDEA_ENDPOINTS" | awk '{print NF}')
+  echo "ALDEA_ENDPOINTS: $EP_COUNT endpoints configured"
+else
+  echo "ALDEA_ENDPOINTS: (none)"
+fi
 
 export OPENAI_API_KEY=""
 export ASSEMBLYAI_API_KEY=""
@@ -14,13 +20,13 @@ export HF_TOKEN="" # new
 export ALDEA_API_KEY=""
 # Optional: list of local Aldea endpoints (comma or space separated)
 # e.g., "127.0.0.1:8800 127.0.0.1:8824 ..."
-export ALDEA_ENDPOINTS=""
+# export ALDEA_ENDPOINTS=""
 
 # export MODEL_ID="assembly/slam-1"
 # export MAX_WORKERS=180
 
 MODEL_IDs=(
-    "openai/whisper-1"
+    # "openai/whisper-1"
     # "groq/whisper-large-v3"
     # "deepgram/nova-3-general"
     # "openai/gpt-4o-transcribe"
@@ -30,7 +36,7 @@ MODEL_IDs=(
     # "revai/machine" # please use --use_url=True
     # "revai/fusion" # please use --use_url=True
     # "speechmatics/enhanced"
-    # "aldea/default"
+    "aldea/finetune_voxpopuli_libriheavy_full_run"
 )
 
 MAX_SAMPLES=400
