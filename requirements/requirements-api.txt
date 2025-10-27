@@ -1,7 +1,12 @@
-dotenv
+python-dotenv
 speechmatics-python
 assemblyai
 openai
 elevenlabs
 rev-ai
+requests
 requests-toolbelt
+httpx
+tqdm
+soundfile
+torchcodec==0.3.0

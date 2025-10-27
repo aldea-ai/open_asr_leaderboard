@@ -4,3 +4,8 @@ evaluate
 datasets
 librosa
 jiwer
+soundfile
+python-dotenv
+requests
+tqdm
+torchcodec==0.3.0

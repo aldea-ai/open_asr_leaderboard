@@ -62,7 +62,7 @@ python3.11 run_eval.py \
 To force a specific single endpoint, either set `ALDEA_API_URL` or pass `--aldea_endpoints` with one value:
 
 ```bash
-export ALDEA_API_URL="https://api.aldea.ai/asr/transcribe"
+export ALDEA_API_URL="https://api.aldea.ai/transcribe"
 # or
 python3.11 run_eval.py \
   --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
@@ -70,14 +70,14 @@ python3.11 run_eval.py \
   --split "test" \
   --model_name "aldea/default" \
   --max_workers 20 \
-  --aldea_endpoints "https://api.aldea.ai/asr/transcribe"
+  --aldea_endpoints "https://api.aldea.ai/transcribe"
 ```
 
 #### Aldea (multiple local endpoints) – one dataset
-Round-robins across local ports to increase throughput. You can supply endpoints via env or the CLI flag (space- or comma-separated). Hosts may be `host:port` or full URLs; the `/asr/transcribe` path is added automatically if missing.
+Round-robins across local ports to increase throughput. You can supply endpoints via env or the CLI flag (space- or comma-separated). Hosts may be `host:port` or full URLs; the `/transcribe` path is added automatically if missing.
 
 ```bash
-export ALDEA_ENDPOINTS="127.0.0.1:8800 127.0.0.1:8824 127.0.0.1:8848 127.0.0.1:8872 127.0.0.1:8896 127.0.0.1:8920 127.0.0.1:8944 127.0.0.1:8801 127.0.0.1:8825 127.0.0.1:8849 127.0.0.1:8873 127.0.0.1:8897 127.0.0.1:8921 127.0.0.1:8945 127.0.0.1:8802 127.0.0.1:8826 127.0.0.1:8850 127.0.0.1:8874 127.0.0.1:8898 127.0.0.1:8922 127.0.0.1:8946"
+export ALDEA_ENDPOINTS="http://stt-api-test.aldea.ai:8800 http://stt-api-test.aldea.ai:8824 http://stt-api-test.aldea.ai:8848 http://stt-api-test.aldea.ai:8872 http://stt-api-test.aldea.ai:8896 http://stt-api-test.aldea.ai:8920 http://stt-api-test.aldea.ai:8944 http://stt-api-test.aldea.ai:8801 http://stt-api-test.aldea.ai:8825 http://stt-api-test.aldea.ai:8849 http://stt-api-test.aldea.ai:8873 http://stt-api-test.aldea.ai:8897 http://stt-api-test.aldea.ai:8921 http://stt-api-test.aldea.ai:8945 http://stt-api-test.aldea.ai:8802 http://stt-api-test.aldea.ai:8826 http://stt-api-test.aldea.ai:8850 http://stt-api-test.aldea.ai:8874 http://stt-api-test.aldea.ai:8898 http://stt-api-test.aldea.ai:8922 http://stt-api-test.aldea.ai:8946"
 
 python3.11 run_eval.py \
   --dataset_path "hf-audio/esb-datasets-test-only-sorted" \
@@ -119,7 +119,7 @@ nohup bash run_api.sh > run_api.log 2>&1 &
 #### Aldea (multiple local endpoints) – all datasets
 
 ```bash
-export ALDEA_ENDPOINTS="127.0.0.1:8800 127.0.0.1:8824 127.0.0.1:8848 127.0.0.1:8872 127.0.0.1:8896 127.0.0.1:8920 127.0.0.1:8944 127.0.0.1:8801 127.0.0.1:8825 127.0.0.1:8849 127.0.0.1:8873 127.0.0.1:8897 127.0.0.1:8921 127.0.0.1:8945 127.0.0.1:8802 127.0.0.1:8826 127.0.0.1:8850 127.0.0.1:8874 127.0.0.1:8898 127.0.0.1:8922 127.0.0.1:8946"
+export ALDEA_ENDPOINTS="http://stt-api-test.aldea.ai:8800 http://stt-api-test.aldea.ai:8824 http://stt-api-test.aldea.ai:8848 http://stt-api-test.aldea.ai:8872 http://stt-api-test.aldea.ai:8896 http://stt-api-test.aldea.ai:8920 http://stt-api-test.aldea.ai:8944 http://stt-api-test.aldea.ai:8801 http://stt-api-test.aldea.ai:8825 http://stt-api-test.aldea.ai:8849 http://stt-api-test.aldea.ai:8873 http://stt-api-test.aldea.ai:8897 http://stt-api-test.aldea.ai:8921 http://stt-api-test.aldea.ai:8945 http://stt-api-test.aldea.ai:8802 http://stt-api-test.aldea.ai:8826 http://stt-api-test.aldea.ai:8850 http://stt-api-test.aldea.ai:8874 http://stt-api-test.aldea.ai:8898 http://stt-api-test.aldea.ai:8922 http://stt-api-test.aldea.ai:8946"
 
 cd api
 nohup bash run_api.sh > run_api.log 2>&1 &
@@ -157,6 +157,63 @@ eval_utils.score_results('./results', 'elevenlabs/scribe_v1')
 ```
 
 Results for each dataset and composite results will be printed.
+
+### Dataset sizes (samples and hours)
+You can quickly get sample counts and approximate total audio hours per dataset/split using the helper script:
+
+```bash
+# counts + hours for all default datasets/splits
+python3.11 get_dataset_sizes.py
+
+# just counts (faster)
+python3.11 get_dataset_sizes.py --no_duration
+
+# only specific datasets
+python3.11 get_dataset_sizes.py --datasets librispeech gigaspeech
+
+# add/override splits
+python3.11 get_dataset_sizes.py --include_splits librispeech:test.clean librispeech:test.other
+
+# to avoid rate limits (recommended)
+export HF_TOKEN=... && python3.11 get_dataset_sizes.py
+```
+
+Faster or more resilient options:
+
+```bash
+# estimate total hours using only the first N rows (fastest)
+python3.11 get_dataset_sizes.py --estimate_duration --sample_rows 2000
+
+# add retry/backoff and gentle pacing between pages
+python3.11 get_dataset_sizes.py \
+  --batch 200 \
+  --progress_every 10 \
+  --max_retries 10 \
+  --initial_backoff 2 \
+  --sleep_between_pages 0.1
+```
+
+Sample results:
+bash```
+bash-3.2$ python get_dataset_sizes.py --no_duration
+dataset	split	samples
+[ami:test] querying size...
+ami	test	12643
+[earnings22:test] querying size...
+earnings22	test	2741
+[gigaspeech:test] querying size...
+gigaspeech	test	19931
+[librispeech:test.clean] querying size...
+librispeech	test.clean	5559
+[librispeech:test.other] querying size...
+librispeech	test.other	5559
+[spgispeech:test] querying size...
+spgispeech	test	39341
+[tedlium:test] querying size...
+tedlium	test	1155
+[voxpopuli:test] querying size...
+voxpopuli	test	1842
+```
 
 ### Example output
 ```text

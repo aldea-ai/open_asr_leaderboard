@@ -6,6 +6,7 @@ import soundfile as sf
 import tempfile
 import time
 import os
+import sys
 import requests
 import itertools
 from tqdm import tqdm
@@ -16,6 +17,13 @@ from openai import OpenAI
 from elevenlabs.client import ElevenLabs
 from rev_ai import apiclient
 from rev_ai.models import CustomerUrlData
+
+# Ensure repository root is on sys.path so local 'normalizer' package resolves
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, os.pardir))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 from normalizer import data_utils
 from normalizer import eval_utils
 import concurrent.futures
@@ -47,9 +55,17 @@ def _normalize_aldea_endpoint(endpoint: str) -> str:
         return e
     if not (e.startswith("http://") or e.startswith("https://")):
         e = f"http://{e}"
-    # Ensure path suffix
-    if not e.rstrip("/").endswith("asr/transcribe"):
-        e = e.rstrip("/") + "/asr/transcribe"
+    # Append default route only if no explicit path is provided
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(e)
+        has_path = bool(parsed.path) and parsed.path != "/"
+        if not has_path:
+            e = e.rstrip("/") + "/transcribe"
+    except Exception:
+        # Fallback to previous behavior but avoid double-appending
+        if "/" not in e.split("//", 1)[-1]:  # no path after host
+            e = e.rstrip("/") + "/transcribe"
     return e
 
 
