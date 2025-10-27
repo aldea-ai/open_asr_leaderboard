@@ -51,6 +51,15 @@ _ALDEA_CYCLE = None
 _ALDEA_LOCK = threading.Lock()
 _ALDEA_LOG_ONCE = False
 _ALDEA_ENDPOINT_LOCKS = {}
+_ALDEA_ENDPOINT_LIMITERS = {}
+_ALDEA_LIMITERS_LOCK = threading.Lock()
+
+# Per-endpoint Aldea pacing (default 0.5 requests/second = 1 request every 2 seconds)
+try:
+    ALDEA_RPS = float(os.getenv("ALDEA_RPS", "0.5"))
+except Exception:
+    ALDEA_RPS = 0.5
+ALDEA_RPM = max(1, int(round(ALDEA_RPS * 60)))
 
 
 def _normalize_aldea_endpoint(endpoint: str) -> str:
@@ -74,7 +83,7 @@ def _normalize_aldea_endpoint(endpoint: str) -> str:
 
 
 def set_aldea_endpoints(endpoints: list[str]) -> None:
-    global ALDEA_ENDPOINTS, _ALDEA_CYCLE, _ALDEA_ENDPOINT_LOCKS
+    global ALDEA_ENDPOINTS, _ALDEA_CYCLE, _ALDEA_ENDPOINT_LOCKS, _ALDEA_ENDPOINT_LIMITERS
     normalized = [_normalize_aldea_endpoint(ep) for ep in endpoints if ep and ep.strip()]
     ALDEA_ENDPOINTS = [ep for ep in normalized if ep]
     if ALDEA_ENDPOINTS:
@@ -82,9 +91,27 @@ def set_aldea_endpoints(endpoints: list[str]) -> None:
         import itertools as _itertools
         _ALDEA_CYCLE = _itertools.cycle(ALDEA_ENDPOINTS)
         _ALDEA_ENDPOINT_LOCKS = {ep: threading.Lock() for ep in ALDEA_ENDPOINTS}
+        # Create (or replace) per-endpoint rate limiters
+        with _ALDEA_LIMITERS_LOCK:
+            _ALDEA_ENDPOINT_LIMITERS = {
+                ep: TokenBucketRateLimiter(rate_per_minute=ALDEA_RPM, capacity=1)
+                for ep in ALDEA_ENDPOINTS
+            }
     else:
         _ALDEA_CYCLE = None
         _ALDEA_ENDPOINT_LOCKS = {}
+        with _ALDEA_LIMITERS_LOCK:
+            _ALDEA_ENDPOINT_LIMITERS = {}
+
+
+def _get_or_create_aldea_limiter(endpoint: str) -> "TokenBucketRateLimiter":
+    # Ensure there is a limiter for this endpoint (handles single-endpoint env/default flows)
+    with _ALDEA_LIMITERS_LOCK:
+        limiter = _ALDEA_ENDPOINT_LIMITERS.get(endpoint)
+        if limiter is None:
+            limiter = TokenBucketRateLimiter(rate_per_minute=ALDEA_RPM, capacity=1)
+            _ALDEA_ENDPOINT_LIMITERS[endpoint] = limiter
+        return limiter
 
 
 def next_aldea_endpoint() -> Optional[str]:
@@ -701,6 +728,7 @@ def transcribe_with_retry(
 
                 endpoint_lock = _ALDEA_ENDPOINT_LOCKS.get(api_url)
                 lock_ctx = endpoint_lock if endpoint_lock is not None else nullcontext()
+                endpoint_limiter = _get_or_create_aldea_limiter(api_url)
                 with lock_ctx:
                     if use_url:
                         # Download audio then POST as raw wave bytes
@@ -708,6 +736,8 @@ def transcribe_with_retry(
                         resp = requests.get(audio_url, timeout=REQUEST_TIMEOUT)
                         resp.raise_for_status()
                         audio_data = BytesIO(resp.content)
+                        # Enforce 0.5 RPS (per-endpoint) immediately before /transcribe POST
+                        endpoint_limiter.acquire()
                         response = requests.post(
                             api_url,
                             headers=headers,
@@ -716,6 +746,8 @@ def transcribe_with_retry(
                         )
                     else:
                         with open(audio_file_path, "rb") as f:
+                            # Enforce 0.5 RPS (per-endpoint) immediately before /transcribe POST
+                            endpoint_limiter.acquire()
                             response = requests.post(
                                 api_url,
                                 headers=headers,

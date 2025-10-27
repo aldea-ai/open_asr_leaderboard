@@ -90,6 +90,19 @@ python3.11 run_eval.py \
 # --aldea_endpoints "$ALDEA_ENDPOINTS"
 ```
 
+### Rate limiting for Aldea
+
+This runner enforces a per-endpoint rate limit for Aldea `/transcribe` requests.
+
+- Default pacing is 0.5 requests per second (one request every 2 seconds) per endpoint.
+- Override via the `ALDEA_RPS` environment variable:
+
+```bash
+export ALDEA_RPS=0.5   # default; 1 request every 2 seconds per endpoint
+```
+
+If you supply multiple endpoints via `ALDEA_ENDPOINTS`, throughput scales roughly with the number of endpoints, since each endpoint has its own limiter.
+
 #### ElevenLabs – one dataset
 
 ```bash
