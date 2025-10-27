@@ -56,7 +56,7 @@ _ALDEA_LIMITERS_LOCK = threading.Lock()
 
 # Per-endpoint Aldea pacing (default 0.5 requests/second = 1 request every 2 seconds)
 try:
-    ALDEA_RPS = float(os.getenv("ALDEA_RPS", "0.5"))
+    ALDEA_RPS = float(os.getenv("ALDEA_RPS", "1")) # looks like it's actually 1 RPS?
 except Exception:
     ALDEA_RPS = 0.5
 ALDEA_RPM = max(1, int(round(ALDEA_RPS * 60)))
