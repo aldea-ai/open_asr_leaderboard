@@ -136,3 +136,4 @@ dmypy.json
 */results/*
 .env.local
 api/other_results
+api/aldea
