@@ -757,20 +757,34 @@ def transcribe_with_retry(
 
                 response.raise_for_status()
                 text = ""
-                try:
-                    payload = response.json()
-                    if isinstance(payload, dict):
-                        if isinstance(payload.get("text"), str):
-                            text = payload["text"]
-                        elif isinstance(payload.get("transcript"), str):
-                            text = payload["transcript"]
-                        elif isinstance(payload.get("data"), dict):
-                            data_obj = payload["data"]
-                            if isinstance(data_obj.get("text"), str):
-                                text = data_obj["text"]
-                except ValueError:
-                    # Not JSON, fall back to raw text
-                    text = response.text or ""
+                
+                # Try parsing as JSONL first (line-by-line JSON)
+                for line in response.text.strip().split('\n'):
+                    if line.strip():
+                        try:
+                            json_obj = json.loads(line)
+                            if "text" in json_obj and json_obj["text"]:
+                                text = json_obj["text"]
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                
+                # Fallback to standard JSON parsing if text not found
+                if not text:
+                    try:
+                        payload = response.json()
+                        if isinstance(payload, dict):
+                            if isinstance(payload.get("text"), str):
+                                text = payload["text"]
+                            elif isinstance(payload.get("transcript"), str):
+                                text = payload["transcript"]
+                            elif isinstance(payload.get("data"), dict):
+                                data_obj = payload["data"]
+                                if isinstance(data_obj.get("text"), str):
+                                    text = data_obj["text"]
+                    except ValueError:
+                        # Not JSON, fall back to raw text
+                        text = response.text or ""
 
                 cleaned = _clean_aldea_transcript((text or "").strip())
                 return cleaned

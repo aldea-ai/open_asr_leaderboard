@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="/Users/kevin/Documents/aldea/open_asr_leaderboard"
+export PYTHONPATH="../"
 echo "PYTHONPATH: $PYTHONPATH"
 if [[ -n "$ALDEA_ENDPOINTS" ]]; then
   EP_COUNT=$(echo "$ALDEA_ENDPOINTS" | awk '{print NF}')
